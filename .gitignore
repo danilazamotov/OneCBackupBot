@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+
+# Virtual env
+.venv/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+backup.log
+
+# Local artifacts
+*.dt
+*.zip
+onec_backup_bot/__pycache__/
+
+# Backups directory (will be re-created on target)
+D:/1C_Backups/
+C:/Users/*/Downloads/1C_Backups/
+
+# Env
+.env
+.env.*
+
+# Misc
+*.bak
+*.tmp
