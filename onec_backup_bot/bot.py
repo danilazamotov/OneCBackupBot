@@ -32,7 +32,6 @@ class BotService:
         self.app.add_handler(CommandHandler("status", self.cmd_status))
         self.app.add_handler(CommandHandler("health", self.cmd_health))
         self.app.add_handler(CommandHandler("lastlog", self.cmd_lastlog))
-        self.app.add_handler(CommandHandler("schedule", self.cmd_schedule))
 
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await self.cmd_help(update, context)
@@ -47,11 +46,12 @@ class BotService:
         text = textwrap.dedent(
             """
             Команды:
-            /backup — выполнить резервное копирование сейчас
+            /backup — выполнить резервное копирование
             /status — последние результаты бэкапов
             /health — состояние системы (CPU, RAM, Disk)
             /lastlog — последние строки лога
-            /schedule — расписание заданий
+            
+            Режим работы: только ручные резервные копии через бота
             """
         ).strip()
         await update.effective_message.reply_text(text)
@@ -66,14 +66,13 @@ class BotService:
         await update.effective_message.reply_text("Запускаю бэкап...")
         try:
             path = await asyncio.to_thread(self.backup_service.make_backup)
-            await asyncio.to_thread(self.backup_service.rotate_backups, path)
             if path:
-                await update.effective_message.reply_text(f"Готово: {path}")
+                await update.effective_message.reply_text(f"✅ Готово: {path}")
             else:
-                await update.effective_message.reply_text("Ошибка при создании бэкапа, см. лог")
+                await update.effective_message.reply_text("⚠️ Бэкап не создан (нет изменений или ошибка), см. лог")
         except Exception as e:
             self.logger.exception("/backup failed: %s", e)
-            await update.effective_message.reply_text(f"Исключение: {e}")
+            await update.effective_message.reply_text(f"❌ Исключение: {e}")
 
     async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
@@ -143,37 +142,3 @@ class BotService:
         except Exception as e:
             await update.effective_message.reply_text(f"Ошибка чтения лога: {e}")
 
-    async def cmd_schedule(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user = update.effective_user
-        if user is None:
-            return
-        if not _is_allowed(user.id, self.allowed):
-            await update.effective_message.reply_text("Access denied")
-            return
-        def humanize(cron: str) -> str:
-            cron = cron.strip()
-            if cron == "*/5 * * * *":
-                return "каждые 5 минут"
-            if cron == "* * * * *":
-                return "каждую минуту"
-            parts = cron.split()
-            if len(parts) == 5:
-                minute, hour, dom, mon, dow = parts
-                if dom == "*" and mon == "*" and dow == "*" and "," in hour and minute.isdigit():
-                    times = []
-                    for h in hour.split(','):
-                        if h.isdigit():
-                            times.append(f"{int(h):02d}:{int(minute):02d}")
-                    if times:
-                        return "каждый день в " + " и ".join(times)
-                if dom == "*" and mon == "*" and dow == "*" and hour.isdigit() and minute.isdigit():
-                    return f"каждый день в {int(hour):02d}:{int(minute):02d}"
-            return "см. cron выражение"
-
-        b = self.cfg.scheduler.backup_cron
-        m = self.cfg.scheduler.metrics_cron
-        text = (
-            f"Backup: {b} — {humanize(b)}\n"
-            f"Metrics: {m} — {humanize(m)}"
-        )
-        await update.effective_message.reply_text(text)

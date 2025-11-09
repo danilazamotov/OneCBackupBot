@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import time
 import logging
 from pathlib import Path
-import datetime as dt
 
 from telegram.ext import Application
 
@@ -11,10 +9,9 @@ from onec_backup_bot.config import load_config
 from onec_backup_bot.logger import setup_logger
 from onec_backup_bot.db import Database
 from onec_backup_bot.backup import BackupService
-from onec_backup_bot.metrics import collect_system_metrics
-from onec_backup_bot.uptime import push_status
-from onec_backup_bot.scheduler import SchedulerService
 from onec_backup_bot.bot import BotService
+from onec_backup_bot.metrics_worker import MetricsWorker
+from onec_backup_bot.api_server import APIServer
 
 
 def main():
@@ -32,7 +29,7 @@ def main():
     db_path = backup_dir / "app.sqlite3"
     db = Database(db_path)
 
-    # Services
+    # Backup service
     backup_service = BackupService(
         onec_exe=cfg.onec.exe,
         base_path=cfg.onec.base_path,
@@ -40,74 +37,39 @@ def main():
         up=cfg.onec.up,
         backup_dir=str(backup_dir),
         file_prefix=cfg.backup.file_prefix,
-        keep_hourly_days=cfg.backup.keep_hourly_days,
-        keep_daily_count=cfg.backup.keep_daily_count,
-        keep_monthly_count=cfg.backup.keep_monthly_count,
-        daily_copy_hour=cfg.backup.daily_copy_hour,
-        monthly_copy_day=cfg.backup.monthly_copy_day,
-        monthly_copy_hour=cfg.backup.monthly_copy_hour,
         logger=logger,
         db=db,
-        uptime_push_url=cfg.uptime_kuma.push_url,
     )
     # Pass compression settings to the service
     setattr(backup_service, 'compress', cfg.backup.compress)
     setattr(backup_service, 'compress_level', cfg.backup.compress_level)
     setattr(backup_service, 'delete_dt_after_compress', cfg.backup.delete_dt_after_compress)
-    # Pass subdirectory names
-    setattr(backup_service, 'hourly_subdir', cfg.backup.hourly_subdir)
-    setattr(backup_service, 'daily_subdir', cfg.backup.daily_subdir)
-    setattr(backup_service, 'monthly_subdir', cfg.backup.monthly_subdir)
-    setattr(backup_service, 'yearly_subdir', cfg.backup.yearly_subdir)
-    setattr(backup_service, 'halfyearly_subdir', cfg.backup.halfyearly_subdir)
-    # Pass yearly/halfyearly rotation config
-    setattr(backup_service, 'yearly_copy_month', cfg.backup.yearly_copy_month)
-    setattr(backup_service, 'yearly_copy_day', cfg.backup.yearly_copy_day)
-    setattr(backup_service, 'yearly_copy_hour', cfg.backup.yearly_copy_hour)
-    setattr(backup_service, 'keep_yearly_count', cfg.backup.keep_yearly_count)
-    setattr(backup_service, 'halfyearly_months', cfg.backup.halfyearly_months)
-    setattr(backup_service, 'halfyearly_copy_day', cfg.backup.halfyearly_copy_day)
-    setattr(backup_service, 'halfyearly_copy_hour', cfg.backup.halfyearly_copy_hour)
-    setattr(backup_service, 'keep_halfyearly_count', cfg.backup.keep_halfyearly_count)
 
-    # Scheduler
-    scheduler = SchedulerService(timezone=cfg.app.timezone, logger=logger)
+    # Start metrics worker for monitoring (optional, will auto-disable if no endpoints set)
+    metrics_worker = MetricsWorker(backup_dir, logger)
+    metrics_worker.start()
 
-    def job_backup():
-        now = dt.datetime.now()
-        if 0 <= now.hour < 8:
-            logger.info("Quiet hours (00:00-07:59). Skipping scheduled backup.")
-            push_status(cfg.uptime_kuma.push_url, "up", "Quiet hours skip")
-            return
-        logger.info("Scheduled backup starting")
-        path = backup_service.make_backup()
-        backup_service.rotate_backups(path)
+    # Start HTTP API server (pull model)
+    api_server = APIServer(
+        backup_service=backup_service,
+        db=db,
+        logger=logger,
+        api_host=cfg.api.host,
+        api_port=cfg.api.port,
+        backup_dir=backup_dir,
+    )
 
-    def job_metrics():
-        try:
-            m = collect_system_metrics(backup_dir)
-            db.insert_metrics(ts=dt.datetime.now(),
-                              cpu_percent=m['cpu_percent'], mem_percent=m['mem_percent'], disk_percent=m['disk_percent'])
-            push_status(cfg.uptime_kuma.push_url, "up", f"CPU {m['cpu_percent']:.0f} RAM {m['mem_percent']:.0f}")
-        except Exception as e:
-            logger.warning(f"Metrics job failed: {e}")
-
-    scheduler.add_cron_job(job_backup, cfg.scheduler.backup_cron, id="backup")
-    scheduler.add_cron_job(job_metrics, cfg.scheduler.metrics_cron, id="metrics")
-
-    scheduler.start()
+    # Run API server in background event loop
+    import threading, asyncio
+    api_loop = asyncio.new_event_loop()
+    api_thread = threading.Thread(target=lambda: (api_loop.run_until_complete(api_server.start()), api_loop.run_forever()),
+                                  name="APIServer", daemon=True)
+    api_thread.start()
 
     # Telegram bot
     if not cfg.telegram.bot_token:
         logger.error("BOT_TOKEN is not set. Fill .env or config.yaml")
-        logger.info("Scheduler will continue to run without Telegram bot.")
-        try:
-            while True:
-                time.sleep(3600)
-        except KeyboardInterrupt:
-            logger.info("Shutting down scheduler")
-            scheduler.shutdown()
-            logger.info("Stopped")
+        logger.error("Application cannot run without Telegram bot token.")
         return
 
     application = Application.builder().token(cfg.telegram.bot_token).build()
@@ -120,12 +82,22 @@ def main():
         cfg=cfg,
     )
 
-    logger.info("Bot started")
+    logger.info("Bot started - manual backup mode")
     try:
         application.run_polling(drop_pending_updates=True)
     finally:
-        logger.info("Shutting down scheduler")
-        scheduler.shutdown()
+        logger.info("Shutting down...")
+        # Stop API server
+        try:
+            if 'api_loop' in locals():
+                api_loop.call_soon_threadsafe(lambda: asyncio.ensure_future(api_server.stop(), loop=api_loop))
+                api_loop.call_soon_threadsafe(api_loop.stop)
+                if 'api_thread' in locals() and api_thread.is_alive():
+                    api_thread.join(timeout=5)
+        except Exception:
+            pass
+        # Stop metrics worker
+        metrics_worker.stop()
         logger.info("Stopped")
 
 

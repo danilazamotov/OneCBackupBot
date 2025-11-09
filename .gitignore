@@ -35,6 +35,7 @@ C:/Users/*/Downloads/1C_Backups/
 # Env
 .env
 .env.*
+!.env.example
 
 # Misc
 *.bak
