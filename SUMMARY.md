@@ -23,35 +23,17 @@
 
 ---
 
-### 2. ️ Интеграция с Grafana вместо Uptime Kuma
+### 2. ️ Интеграция с Grafana (локальный Prometheus)
 
-**Полностью реализовано!** Бот теперь поддерживает:
+Бот предоставляет метрики в формате Prometheus на эндпоинте `/api/metrics.prom`. Рекомендуемая схема: Prometheus локально скрейпит этот эндпоинт, Grafana строит графики и алерты.
 
-#### Поддерживаемые протоколы:
-- ✅ **Prometheus Push Gateway** (локально)
-- ✅ **Grafana Cloud Prometheus** (облако, рекомендуется)
-- ✅ **InfluxDB v2** (альтернатива)
-- ✅ **Grafana Loki** (для логов)
-
-#### Настройка в .env:
-```env
-# Grafana Cloud (рекомендуется)
-GRAFANA_PROMETHEUS_URL=https://prometheus-prod-XX-xxx.grafana.net/api/prom/push
-GRAFANA_PROMETHEUS_USER=123456
-GRAFANA_PROMETHEUS_PASSWORD=glc_xxxxx
-METRICS_INTERVAL=60
-
-# Или локальный Prometheus Pushgateway
-PROMETHEUS_PUSHGATEWAY_URL=http://localhost:9091
-
-# Или InfluxDB
-INFLUXDB_URL=http://localhost:8086
-INFLUXDB_TOKEN=your_token
-INFLUXDB_ORG=myorg
-INFLUXDB_BUCKET=onec_metrics
-
-# Loki для логов (опционально)
-GRAFANA_LOKI_URL=http://localhost:3100
+Пример scrape-конфига Prometheus:
+```yaml
+scrape_configs:
+  - job_name: 'onec_backup_bot'
+    static_configs:
+      - targets: ['<SERVER_IP>:8080']
+    metrics_path: /api/metrics.prom
 ```
 
 📊 **Подробная документация:** `GRAFANA_INTEGRATION.md`
@@ -177,11 +159,9 @@ BACKUP_DIR=E:\Backups\1C
 ## Новые файлы
 
 ### 1. **onec_backup_bot/grafana.py**
-Интеграция с Grafana:
-- Отправка метрик в Prometheus
-- Отправка метрик в InfluxDB
-- Отправка логов в Loki
-- Обработка событий бэкапов
+Интеграция с Prometheus:
+- Отправка метрик в Pushgateway (опционально)
+- Обработка событий бэкапов (локальные метрики)
 
 ### 2. **onec_backup_bot/metrics_extended.py**
 Расширенный сбор метрик:
@@ -202,11 +182,10 @@ BACKUP_DIR=E:\Backups\1C
 - Graceful shutdown
 
 ### 4. **GRAFANA_INTEGRATION.md**
-Полное руководство по Grafana:
-- Настройка Grafana Cloud
+Руководство по локальному Prometheus + Grafana:
 - Настройка локального Prometheus
-- Список всех метрик
-- Готовые дашборды
+- Список метрик
+- Готовые дашборды и PromQL
 - Примеры PromQL запросов
 - Настройка алертов
 - API endpoints
@@ -296,7 +275,7 @@ nssm start OneCBackupBot
 #### 5. Проверьте метрики в Grafana
 - Explore → Prometheus
 - Query: `onec_cpu_percent`
-- Вы должны увидеть график!
+- Должны увидеть график
 
 #### 6. Импортируйте дашборды
 См. готовые дашборды в `GRAFANA_INTEGRATION.md`
@@ -354,8 +333,7 @@ OneCBackupBot/
     ├── db.py                       # SQLite
     ├── logger.py                   # Логирование
     ├── metrics.py                  # Базовые метрики (сохранен)
-    ├── uptime.py                   # Uptime Kuma (сохранен)
-    ├── grafana.py                  # ← НОВЫЙ: Grafana интеграция
+    ├── grafana.py                  # Интеграция с Prometheus (локально)
     ├── metrics_extended.py         # ← НОВЫЙ: Расширенный сбор метрик
     └── metrics_worker.py           # ← НОВЫЙ: Фоновый worker
 ```

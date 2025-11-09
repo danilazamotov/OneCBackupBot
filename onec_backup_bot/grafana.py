@@ -1,6 +1,6 @@
 """
-Grafana integration module
-Supports: Prometheus Push Gateway, Grafana Cloud, InfluxDB, Loki
+Grafana/metrics integration module
+Supports: Prometheus Pushgateway, InfluxDB, Loki
 """
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ class GrafanaClient:
     
     def push_metrics_prometheus(self, metrics: Dict[str, Any], job: str = "onec_backup_bot") -> bool:
         """
-        Send metrics to Prometheus Push Gateway or Grafana Cloud
+        Send metrics to Prometheus Pushgateway endpoint
         
         Metrics format:
         {
@@ -75,15 +75,9 @@ class GrafanaClient:
             
             payload = "\n".join(lines) + "\n"
             
-            # Determine endpoint
-            if "grafana.net" in self.prometheus_url:
-                # Grafana Cloud
-                url = self.prometheus_url
-                auth = (self.prometheus_user, self.prometheus_password) if self.prometheus_user else None
-            else:
-                # Prometheus Pushgateway
-                url = f"{self.prometheus_url}/metrics/job/{job}"
-                auth = None
+            # Determine endpoint (generic Pushgateway-compatible)
+            url = f"{self.prometheus_url}/metrics/job/{job}"
+            auth = None
             
             response = requests.post(
                 url,

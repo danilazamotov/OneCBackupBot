@@ -46,10 +46,7 @@ BACKUP_DIR=D:\1C_Backups
 ONEC_UC=Администратор
 ONEC_UP=пароль
 
-# Опционально: Grafana Cloud для мониторинга
-GRAFANA_PROMETHEUS_URL=https://prometheus-prod-XX-xxx.grafana.net/api/prom/push
-GRAFANA_PROMETHEUS_USER=123456
-GRAFANA_PROMETHEUS_PASSWORD=your_token_here
+# Опционально: интервал метрик (используется внутренним сборщиком)
 METRICS_INTERVAL=60
 ```
 
@@ -110,7 +107,6 @@ nssm start OneCBackupBot
 - `onec_backup_bot/config.py` — конфигурация
 - `onec_backup_bot/db.py` — SQLite история
 - `onec_backup_bot/logger.py` — логирование
-- `onec_backup_bot/uptime.py` — Uptime Kuma интеграция
 - `config.yaml` — настройки
 
 ## Безопасность
@@ -119,29 +115,29 @@ nssm start OneCBackupBot
 - `.env` не коммитится (см. `.gitignore`)
 - Доступ к боту только для указанных Telegram ID
 
-## Мониторинг с Grafana
+## Мониторинг (Grafana + Prometheus, локально)
 
-Бот автоматически отправляет метрики в **Grafana Cloud**, **Prometheus** или **InfluxDB**:
+Бот предоставляет метрики для локального **Prometheus** через эндпоинт скрейпа.
 
-### Отправляемые метрики:
+### Доступные метрики:
 - **Система:** CPU, RAM, Disk, Network, Uptime
 - **RDP сессии:** Количество активных пользователей (Windows)
 - **Процессы:** Количество процессов, топ по CPU/RAM
 - **Диск I/O:** Операции чтения/записи, throughput
 - **Бэкапы:** Статус, размер, длительность
 
-### Быстрый старт с Grafana Cloud:
-1. Создайте бесплатный аккаунт на https://grafana.com/
-2. Получите Prometheus Push URL и токен
-3. Добавьте в `.env`:
-   ```env
-   GRAFANA_PROMETHEUS_URL=https://prometheus-prod-XX-xxx.grafana.net/api/prom/push
-   GRAFANA_PROMETHEUS_USER=123456
-   GRAFANA_PROMETHEUS_PASSWORD=your_token_here
+### Быстрый старт с локальным Prometheus:
+1. В Prometheus добавьте конфиг скрейпа:
+   ```yaml
+   scrape_configs:
+     - job_name: 'onec_backup_bot'
+       static_configs:
+         - targets: ['<SERVER_IP>:8080']
+       metrics_path: /api/metrics.prom
    ```
-4. Запустите бота — метрики начнут отправляться каждые 60 секунд!
+2. В Grafana добавьте Prometheus как Data Source и строите графики/алерты.
 
-📊 **Подробности:** См. `GRAFANA_INTEGRATION.md`
+📊 **Подробности:** см. `GRAFANA_INTEGRATION.md`
 
 ## Дополнительно
 

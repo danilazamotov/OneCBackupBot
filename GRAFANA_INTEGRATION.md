@@ -1,12 +1,10 @@
-# Интеграция с Grafana — Полное руководство
+# Интеграция с Grafana (локальный Prometheus)
 
-## Обзор
+Бот предоставляет системные метрики через HTTP эндпоинт в формате Prometheus exposition. Рекомендуемая схема:
 
-Бот поддерживает отправку метрик в **Grafana** через несколько протоколов:
-1. **Prometheus Push Gateway** (рекомендуется) — для метрик
-2. **Grafana Cloud Prometheus** — облачное решение
-3. **InfluxDB** — альтернативная TSDB
-4. **Grafana Loki** — для логов (опционально)
+Бот → Prometheus (scrape `/api/metrics.prom`) → Grafana (графики и алерты)
+
+Никаких облачных сервисов не требуется.
 
 ## Собираемые метрики
 
@@ -78,124 +76,20 @@
 
 ---
 
-## Настройка
+## Настройка локального Prometheus
 
-### Вариант 1: Grafana Cloud (рекомендуется)
+1) Установите Prometheus и Grafana (на одной машине/хостинге).
 
-#### 1. Создайте аккаунт Grafana Cloud
-- Зарегистрируйтесь на https://grafana.com/
-- Получите бесплатный план (до 10k метрик)
-
-#### 2. Получите учетные данные Prometheus
-В Grafana Cloud:
-1. Перейдите в **Configuration** → **Data Sources**
-2. Выберите **Prometheus**
-3. Скопируйте:
-   - **URL**: `https://prometheus-prod-XX-xxx.grafana.net/api/prom/push`
-   - **User**: обычно это числовой ID
-   - **Password**: API ключ (Generate Now)
-
-#### 3. Настройте .env
-```env
-GRAFANA_PROMETHEUS_URL=https://prometheus-prod-XX-xxx.grafana.net/api/prom/push
-GRAFANA_PROMETHEUS_USER=123456
-GRAFANA_PROMETHEUS_PASSWORD=glc_eyJrIjoixxxxxxxx...
-METRICS_INTERVAL=60
-```
-
-#### 4. Запустите бота
-```powershell
-python main.py
-```
-
-Метрики начнут отправляться каждые 60 секунд!
-
----
-
-### Вариант 2: Локальный Prometheus + Pushgateway
-
-#### 1. Установите Prometheus Pushgateway
-
-**Docker:**
-```powershell
-docker run -d -p 9091:9091 prom/pushgateway
-```
-
-**Скачать напрямую:**
-https://github.com/prometheus/pushgateway/releases
-
-#### 2. Настройте Prometheus для сбора данных
-
-`prometheus.yml`:
+2) Добавьте в `prometheus.yml` конфиг скрейпа:
 ```yaml
 scrape_configs:
-  - job_name: 'pushgateway'
-    honor_labels: true
+  - job_name: 'onec_backup_bot'
     static_configs:
-      - targets: ['localhost:9091']
+      - targets: ['<SERVER_IP>:8080']
+    metrics_path: /api/metrics.prom
 ```
 
-#### 3. Настройте .env
-```env
-PROMETHEUS_PUSHGATEWAY_URL=http://localhost:9091
-METRICS_INTERVAL=60
-```
-
-#### 4. Настройте Grafana для визуализации
-1. Добавьте Prometheus как Data Source в Grafana
-2. Используйте готовые дашборды (см. ниже)
-
----
-
-### Вариант 3: InfluxDB
-
-#### 1. Установите InfluxDB
-```powershell
-# Docker
-docker run -d -p 8086:8086 influxdb:2.7
-
-# Или скачайте: https://portal.influxdata.com/downloads/
-```
-
-#### 2. Создайте bucket и token
-```bash
-# Через UI: http://localhost:8086
-# Или через CLI:
-influx setup
-influx bucket create -n onec_metrics
-influx auth create --org myorg --all-access
-```
-
-#### 3. Настройте .env
-```env
-INFLUXDB_URL=http://localhost:8086
-INFLUXDB_TOKEN=your_token_here
-INFLUXDB_ORG=myorg
-INFLUXDB_BUCKET=onec_metrics
-METRICS_INTERVAL=60
-```
-
----
-
-### Вариант 4: Grafana Loki (логи)
-
-#### 1. Установите Loki
-```powershell
-docker run -d -p 3100:3100 grafana/loki:latest
-```
-
-#### 2. Настройте .env
-```env
-GRAFANA_LOKI_URL=http://localhost:3100
-# Или для Grafana Cloud:
-GRAFANA_LOKI_URL=https://logs-prod-xxx.grafana.net
-GRAFANA_LOKI_USER=123456
-GRAFANA_LOKI_PASSWORD=your_token_here
-```
-
-Логи событий бэкапа будут отправляться в Loki!
-
----
+3) В Grafana добавьте Prometheus как Data Source и построите панели.
 
 ## Готовые дашборды для Grafana
 
@@ -367,74 +261,12 @@ sum_over_time(onec_backup_status[24h])
 
 ---
 
-## API Endpoints
+## HTTP эндпоинты бота
 
-### Prometheus Push Gateway API
-
-**Отправка метрик:**
-```http
-POST /metrics/job/onec_backup_bot HTTP/1.1
-Host: localhost:9091
-Content-Type: text/plain
-
-onec_cpu_percent 45.2
-onec_memory_percent 67.1
-onec_disk_percent 82.3
-```
-
-**Удаление метрик:**
-```http
-DELETE /metrics/job/onec_backup_bot HTTP/1.1
-Host: localhost:9091
-```
-
-### Grafana Cloud Prometheus API
-
-**Отправка метрик:**
-```http
-POST /api/prom/push HTTP/1.1
-Host: prometheus-prod-XX-xxx.grafana.net
-Authorization: Basic <base64(user:password)>
-Content-Type: text/plain
-
-onec_cpu_percent 45.2 1699999999000
-onec_memory_percent 67.1 1699999999000
-```
-
-### InfluxDB API
-
-**Отправка метрик (Line Protocol):**
-```http
-POST /api/v2/write?org=myorg&bucket=onec_metrics&precision=ns HTTP/1.1
-Host: localhost:8086
-Authorization: Token your_token_here
-Content-Type: text/plain
-
-system_metrics,host=server01 cpu_percent=45.2,memory_percent=67.1 1699999999000000000
-```
-
-### Grafana Loki API
-
-**Отправка логов:**
-```http
-POST /loki/api/v1/push HTTP/1.1
-Host: localhost:3100
-Content-Type: application/json
-
-{
-  "streams": [
-    {
-      "stream": {
-        "job": "onec_backup_bot",
-        "level": "info"
-      },
-      "values": [
-        ["1699999999000000000", "Backup completed successfully"]
-      ]
-    }
-  ]
-}
-```
+- `GET /api/metrics.prom` — Prometheus формат (используйте в `metrics_path`)
+- `GET /api/metrics` — JSON (для отладки и интеграций)
+- `GET /api/health` — быстрый статус
+- `GET /api/backup/last` — информация о последнем бэкапе
 
 ---
 
@@ -475,22 +307,18 @@ Content-Type: application/json
 
 ---
 
-## Рекомендации по производству
+## Рекомендации по продакшену
 
-1. **Интервал метрик:** 60 секунд оптимально для большинства случаев
-2. **Retention:** Настройте в Prometheus/InfluxDB хранение 30-90 дней
-3. **Алерты:** Настройте уведомления в Telegram через Grafana Alerting
-4. **Backup метрик:** InfluxDB/Prometheus также нужно бэкапить!
-5. **Безопасность:** Используйте HTTPS для Grafana Cloud и локальных endpoints
+1. Ограничьте доступ к `API_PORT` файрволом (только ваши подсети/VPN)
+2. Настройте алерты в Grafana/Prometheus (CPU>90%, Disk>85%, отсутствие метрик, статус бэкапа)
+3. Хранение Prometheus: выберите срок хранения данных 30–90 дней под ваши требования
 
 ---
 
 ## Дополнительная информация
 
-- **Grafana Cloud Docs:** https://grafana.com/docs/grafana-cloud/
-- **Prometheus Pushgateway:** https://github.com/prometheus/pushgateway
-- **InfluxDB v2 Docs:** https://docs.influxdata.com/influxdb/v2/
-- **Grafana Loki:** https://grafana.com/docs/loki/latest/
+- **Prometheus**: https://prometheus.io/docs/introduction/overview/
+- **Grafana**: https://grafana.com/docs/grafana/latest/
 
 ## Поддержка
 

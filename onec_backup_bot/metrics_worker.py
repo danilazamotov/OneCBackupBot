@@ -84,7 +84,7 @@ class MetricsWorker:
             # Flatten for Prometheus
             flat_metrics = flatten_metrics_for_prometheus(metrics)
             
-            # Send to Prometheus/Grafana Cloud
+            # Send to Prometheus
             if self.grafana.prometheus_url:
                 success = self.grafana.push_metrics_prometheus(flat_metrics)
                 if success:
